@@ -1,51 +1,71 @@
 const authService = require('../services/auth.service')
 const City = require('../models/cities.model')
 const User = require('../models/user.model')
-const ApiError = require("../error/api.error");
-const bcrypt = require("bcrypt");
-const UserDto = require("../dto/user.dto");
-const Chat = require("../models/chat.model");
-const Code = require("../models/code.model");
-const Followers = require("../models/followers.model");
-const Notification = require("../models/notification.model");
-const tokenService = require("../services/token.service");
-const axios = require("axios");
+const ApiError = require('../error/api.error')
+const bcrypt = require('bcrypt')
+const UserDto = require('../dto/user.dto')
+const Chat = require('../models/chat.model')
+const Code = require('../models/code.model')
+const Followers = require('../models/followers.model')
+const Notification = require('../models/notification.model')
+const tokenService = require('../services/token.service')
+const axios = require('axios')
 const moment = require('moment')
 
 class AuthController {
+  async getUpdateAt(req, res, next) {
+    const { phone } = req.body
+    const user = await User.findOne({ phone: phone })
+    const code = Math.floor(1000 + Math.random() * 9000)
+    const userCode = await Code.findOne({ user: user._id.toString() })
+
+    if (!user) {
+      await User.create({ phone })
+      await new Chat({ user: newUser._id, chats: [] }).save()
+      await new Followers({ user: newUser._id, followers: [], following: [], friends: [] }).save()
+      await new Notification({ user: newUser._id, notifications: [] }).save()
+      const user = await User.findOne({ phone: phone })
+      await Code.create({ user: user._id, code: code })
+      const findCode = await Code.findOne({ user: user._id.toString() })
+      return res.json(findCode.updatedAt)
+    }
+
+    return res.json(userCode)
+  }
+
   async sendCode(req, res, next) {
     try {
-      const {phone} = req.body
-      const user = await User.findOne({phone: phone})
+      const { phone } = req.body
+      const user = await User.findOne({ phone: phone })
       // const code = await axios.get(`https://sms.ru/code/call?phone=${phone}&api_id=${process.env.SMS_API_KEY}`)
       const code = Math.floor(1000 + Math.random() * 9000)
+      const userCode = await Code.findOne({ user: user._id })
 
-      if (user) {
-        const userCode = await Code.findOne({user: user._id})
-        if (userCode) {
-          if (moment(userCode.updatedAt).add('5', "minutes").format('h:mm:ss') > moment(Date.now()).format('h:mm:ss')) {
-            const millis = Math.abs(moment(userCode.updatedAt).add('5', "minutes") - Date.now())
-            const minutes = Math.floor(millis / 60000);
-            const seconds = ((millis % 60000) / 1000).toFixed(0);
-            return next(ApiError.internal(`Повторная отправка возможна через: ${minutes + ":" + (seconds < 10 ? '0' : '') + seconds}`))
-          }
-          userCode.code = code
-          await userCode.save()
-          return res.json(user._id)
-        } else {
-          await Code.create({user: user._id, code: code})
-          return res.json(user._id)
-        }
-      } else {
-        const newUser = await User.create({phone})
-        const userDto = new UserDto(newUser)
-
-        await new Chat({user: userDto.id, chats: []}).save()
-        await new Followers({user: userDto.id, followers: [], following: [], friends: []}).save()
-        await new Notification({user: userDto.id, notifications: []}).save()
-        await Code.create({user: newUser._id, code: code.data.code})
+      if (!user) {
+        const newUser = await User.create({ phone })
+        await new Chat({ user: newUser._id, chats: [] }).save()
+        await new Followers({ user: newUser._id, followers: [], following: [], friends: [] }).save()
+        await new Notification({ user: newUser._id, notifications: [] }).save()
+        await Code.create({ user: newUser._id, code: code })
         return res.json(newUser._id)
       }
+
+      if (!userCode) {
+        await Code.create({ user: user._id, code: code })
+        return res.json(user._id)
+      }
+
+      if (moment(userCode.updatedAt).add('5', 'minutes').format('h:mm:ss') > moment(Date.now()).format('h:mm:ss')) {
+        const millis = Math.abs(moment(userCode.updatedAt).add('5', 'minutes') - Date.now())
+        const minutes = Math.floor(millis / 60000)
+        const seconds = ((millis % 60000) / 1000).toFixed(0)
+        return next(
+          ApiError.internal(`Повторная отправка возможна через: ${minutes + ':' + (seconds < 10 ? '0' : '') + seconds}`)
+        )
+      }
+      userCode.code = code
+      await userCode.save()
+      return res.json({ userId: user._id, date: userCode.updatedAt })
     } catch (e) {
       return next(ApiError.unauthorized('ошибка отправки кода'))
     }
@@ -58,7 +78,7 @@ class AuthController {
 
     if (findCode) {
       const userDto = new UserDto(findCode.user)
-      const token = tokenService.generateTokens({...userDto})
+      const token = tokenService.generateTokens({ ...userDto })
       await tokenService.saveToken(findCode.user._id, token.accessToken, token.refreshToken)
       res.cookie('refreshToken', token.refreshToken, {
         maxAge: 30 * 86400 * 1000,
@@ -76,13 +96,13 @@ class AuthController {
       })
       return res.json({ token: token.accessToken })
     } else {
-      return res.json({ message: 'Неверный код' })
+      return next(ApiError.forbidden('Неверный код'))
     }
   }
 
-  async changePassword(req,res,next) {
-    const {userId, currentPassword, newPassword, repeatNewPassword} = req.body
-    await authService.changePassword(userId,currentPassword,newPassword,repeatNewPassword, res, next)
+  async changePassword(req, res, next) {
+    const { userId, currentPassword, newPassword, repeatNewPassword } = req.body
+    await authService.changePassword(userId, currentPassword, newPassword, repeatNewPassword, res, next)
   }
 
   async logout(req, res) {

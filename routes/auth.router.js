@@ -5,6 +5,7 @@ const auth = require('../middleware/auth.middleware')
 
 router.post('/send-code', authController.sendCode)
 router.post('/enter-code', authController.enterCode)
+router.post('/updated-at', authController.getUpdateAt)
 router.post('/logout', authController.logout)
 router.post('/settings', authController.settings)
 router.post('/change-password', authController.changePassword)
